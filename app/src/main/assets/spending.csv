@@ -1,4 +1,3 @@
-date_time,user_id,category,days_from_payday,weekday,is_weekend,is_holiday,amount
 2025-01-01T00:00:00+09:00,U001,utilities,-24,2,False,False,30.0
 2025-01-02T00:00:00+09:00,U001,transport,-23,3,False,False,2030.0
 2025-01-02T00:00:00+09:00,U001,food,-23,3,False,False,7480.0

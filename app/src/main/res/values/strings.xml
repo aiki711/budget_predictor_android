@@ -1,3 +1,15 @@
 <resources>
     <string name="app_name">budget_predictor_android</string>
+
+    <string-array name="categories">
+        <item>food</item>
+        <item>transport</item>
+        <item>entertainment</item>
+        <item>clothing_beauty_daily</item>
+        <item>utilities</item>
+        <item>social</item>
+        <item>other</item>
+    </string-array>
 </resources>
+
+

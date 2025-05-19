@@ -3,27 +3,27 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:gravity="center"
     android:padding="24dp">
 
-    <TextView
-        android:id="@+id/outputTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="予測結果はここに表示されます"
-        android:textSize="18sp" />
-
-    <Button
-        android:id="@+id/predictMonthButton"
+    <Spinner
+        android:id="@+id/categorySpinner"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="📅 月末までの予測" />
+        android:entries="@array/categories" />
 
-    <Button
-        android:id="@+id/predictWeekButton"
+    <EditText
+        android:id="@+id/amountEditText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="🕒 7日後までの予測" />
+        android:inputType="numberDecimal"
+        android:hint="金額を入力" />
+
+    <Button
+        android:id="@+id/saveButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="保存する" />
+
 
 
 </LinearLayout>
