@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package spendingapi;
+
+message DataUploadRequest {
+  string client_id = 1;
+  string csv_data = 2;
+}
+
+message UploadResponse {
+  string message = 1;
+}
+
+message VersionRequest {
+  string client_id = 1;
+}
+
+message VersionResponse {
+  string latest_version = 1;
+  string model_type = 2;
+  string download_url = 3;
+}
+
+message ModelRequest {
+  string model_type = 1;
+}
+
+message ModelResponse {
+  bytes model_data = 1;
+}
+
+service FederatedClient {
+  rpc UploadLocalData (DataUploadRequest) returns (UploadResponse);
+  rpc CheckModelVersion (VersionRequest) returns (VersionResponse);
+  rpc DownloadModel (ModelRequest) returns (ModelResponse);
+}

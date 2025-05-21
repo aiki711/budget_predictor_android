@@ -1,29 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:padding="24dp">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:id="@+id/outputTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="予測結果はここに表示されます"
-        android:textSize="18sp" />
-
-    <Button
-        android:id="@+id/predictMonthButton"
+    <LinearLayout
+        android:id="@+id/mainLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="📅 月末までの予測" />
+        android:orientation="vertical"
+        android:padding="16dp">
 
-    <Button
-        android:id="@+id/predictWeekButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="🕒 7日後までの予測" />
+        <!-- あなたの既存の内容をここに配置します -->
 
+        <Button
+            android:id="@+id/predictMonthButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📅 月末までの予測" />
 
-</LinearLayout>
+        <Button
+            android:id="@+id/predictWeekButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🕒 7日後までの予測" />
+
+        <Button
+            android:id="@+id/rebalanceButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🔄 リバランスを表示" />
+
+        <Button
+            android:id="@+id/dailyLimitButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📆 日割り上限を表示" />
+
+        <Button
+            android:id="@+id/alertButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🛑 今日の使いすぎを確認" />
+
+        <Button
+            android:id="@+id/downloadTotalModelButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="総支出モデルのダウンロード" />
+
+        <Button
+            android:id="@+id/downloadRatioModelButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="カテゴリ別モデルのダウンロード" />
+
+        <TextView
+            android:id="@+id/outputTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="12dp"
+            android:textSize="16sp"
+            android:textColor="?android:textColorPrimary" />
+
+    </LinearLayout>
+</ScrollView>

@@ -1,5 +1,7 @@
 package com.example.budget_predictor_android
 
+import kotlin.math.abs
+import kotlin.math.sqrt
 import ai.onnxruntime.*
 import android.content.Context
 import android.os.Bundle
@@ -9,15 +11,16 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 import java.nio.FloatBuffer
-import java.time.LocalDateTime
-import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.time.temporal.WeekFields
-import java.util.Calendar
-import kotlin.math.abs
-import kotlin.math.sqrt
+
+import io.grpc.ManagedChannelBuilder
+import spendingapi.FederatedClientGrpc
+import spendingapi.Spending
+import java.time.LocalDate
 
 class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -26,11 +29,20 @@ class MainActivity : AppCompatActivity() {
 
         val predictMonthButton = findViewById<Button>(R.id.predictMonthButton)
         val predictWeekButton = findViewById<Button>(R.id.predictWeekButton)
+        val rebalanceButton = findViewById<Button>(R.id.rebalanceButton)
+        val dailyLimitButton = findViewById<Button>(R.id.dailyLimitButton)
+        val alertButton = findViewById<Button>(R.id.alertButton)
         val outputTextView = findViewById<TextView>(R.id.outputTextView)
+        val downloadTotalModelButton = findViewById<Button>(R.id.downloadTotalModelButton)
+        downloadTotalModelButton.setOnClickListener {
+            fetchAndSaveModel(this, "total")  // "ratio"もOK
+        }
+        val downloadRatioModelButton = findViewById<Button>(R.id.downloadRatioModelButton)
+        downloadRatioModelButton.setOnClickListener {
+            fetchAndSaveModel(this, "ratio")  // "ratio"もOK
+        }
 
         val categoryNames = listOf("食費", "交通", "娯楽", "衣類・美容・日用品", "光熱費", "交際費", "その他")
-
-        val userBudget = loadLastMonthBudget(this, categoryNames)
 
         fun getRisk(pred: Float, budget: Float): String {
             return when {
@@ -38,6 +50,78 @@ class MainActivity : AppCompatActivity() {
                 pred > budget -> "🟠 中リスク"
                 else -> "🟢 低リスク"
             }
+        }
+
+        fun getRebalanceSuggestion(predicted: Map<String, Float>, budget: Map<String, Float>): String {
+            val excess = mutableMapOf<String, Float>()
+            val deficit = mutableMapOf<String, Float>()
+
+            for ((name, pred) in predicted) {
+                val limit = budget[name] ?: 0f
+                val diff = pred - limit
+                if (diff > 0) deficit[name] = diff
+                else excess[name] = -diff
+            }
+
+            val totalExcess = excess.values.sum()
+            val totalDeficit = deficit.values.sum()
+            if (totalDeficit == 0f) return "✅ すべてのカテゴリが予算内です"
+
+            val suggestions = mutableListOf<String>()
+            for ((cat, amt) in deficit) {
+                val share = if (totalExcess > 0) amt / totalDeficit else 0f
+                val covered = share * totalExcess
+                suggestions.add("$cat に %.0f 円 補填提案".format(covered))
+            }
+            return suggestions.joinToString("\n")
+        }
+
+        fun getDailyLimit(budget: Float): String {
+            val today = LocalDate.now()
+            val endOfMonth = YearMonth.now().atEndOfMonth()
+            val remainingDays = ChronoUnit.DAYS.between(today, endOfMonth).toInt().coerceAtLeast(1)
+            val dailyLimit = budget / remainingDays
+            return "📆 月末まで残り $remainingDays 日\n日割り支出上限: %.0f 円/日".format(dailyLimit)
+        }
+
+        fun loadLastMonthBudget(context: Context, categoryNames: List<String>): Map<String, Float> {
+            val file = File(context.filesDir, "spending.csv")
+            if (!file.exists()) return categoryNames.associateWith { 0f }
+
+            val categoryMap = mapOf(
+                "food" to "食費",
+                "transport" to "交通",
+                "entertainment" to "娯楽",
+                "clothing_beauty_daily" to "衣類・美容・日用品",
+                "utilities" to "光熱費",
+                "social" to "交際費",
+                "other" to "その他"
+            )
+
+            val lines = file.readLines()
+            val lastMonth = YearMonth.now().minusMonths(1)
+
+            val filtered = lines.mapNotNull {
+                val parts = it.split(",")
+                if (parts.size >= 4) {
+                    val date = try {
+                        OffsetDateTime.parse(parts[0]).toLocalDate()
+                    } catch (e: Exception) {
+                        null
+                    }
+                    val rawCategory = parts[2]
+                    val category = categoryMap[rawCategory] ?: return@mapNotNull null
+                    val amount = parts.last().toFloatOrNull() ?: 0f
+                    if (date != null && YearMonth.from(date) == lastMonth) Pair(category, amount) else null
+                } else null
+            }
+
+            val budgetMap = mutableMapOf<String, Float>()
+            for ((category, amount) in filtered) {
+                budgetMap[category] = budgetMap.getOrDefault(category, 0f) + amount
+            }
+            budgetMap["total_budget"] = budgetMap.values.sum()
+            return budgetMap
         }
 
         predictMonthButton.setOnClickListener {
@@ -48,8 +132,10 @@ class MainActivity : AppCompatActivity() {
                 val totalAmountMonth = predictDays(this, inputTotal, 30)
                 val ratioArray = runRatioInference(this, inputRatio)
 
+                val userBudget = loadLastMonthBudget(this, categoryNames)
                 val categoryDetails = mutableListOf<String>()
                 val riskSummaries = mutableListOf<String>()
+                val predicted = mutableMapOf<String, Float>()
 
                 ratioArray.mapIndexed { i, r ->
                     val yen = r * totalAmountMonth
@@ -58,12 +144,16 @@ class MainActivity : AppCompatActivity() {
                     val risk = getRisk(yen, budget)
                     categoryDetails.add("$name: %.0f 円".format(yen))
                     riskSummaries.add("$name（予算: %.0f 円）→ %s".format(budget, risk))
+                    predicted[name] = yen
                 }
 
-                outputTextView.text = "\uD83D\uDCC5 月末までの予測支出合計: %.0f 円\n\n%s\n\n\u26A0\uFE0F リスク評価\n%s".format(
+                val rebalanceText = getRebalanceSuggestion(predicted, userBudget)
+
+                outputTextView.text = "\uD83D\uDCC5 月末までの予測支出合計: %.0f 円\n\n%s\n\n\u26A0\uFE0F リスク評価\n%s\n\n\uD83D\uDD04 リバランス提案\n%s".format(
                     totalAmountMonth,
                     categoryDetails.joinToString("\n"),
-                    riskSummaries.joinToString("\n")
+                    riskSummaries.joinToString("\n"),
+                    rebalanceText
                 )
 
             } catch (e: Exception) {
@@ -80,8 +170,10 @@ class MainActivity : AppCompatActivity() {
                 val totalAmountWeek = predictDays(this, inputTotal, 7)
                 val ratioArray = runRatioInference(this, inputRatio)
 
+                val userBudget = loadLastMonthBudget(this, categoryNames)
                 val categoryDetails = mutableListOf<String>()
                 val riskSummaries = mutableListOf<String>()
+                val predicted = mutableMapOf<String, Float>()
 
                 ratioArray.mapIndexed { i, r ->
                     val yen = r * totalAmountWeek
@@ -90,17 +182,110 @@ class MainActivity : AppCompatActivity() {
                     val risk = getRisk(yen, budget)
                     categoryDetails.add("$name: %.0f 円".format(yen))
                     riskSummaries.add("$name（予算: %.0f 円）→ %s".format(budget, risk))
+                    predicted[name] = yen
                 }
 
-                outputTextView.text = "\uD83D\uDD52 7日後までの予測支出合計: %.0f 円\n\n%s\n\n\u26A0\uFE0F リスク評価\n%s".format(
+                val rebalanceText = getRebalanceSuggestion(predicted, userBudget)
+
+                outputTextView.text = "\uD83D\uDD52 7日後までの予測支出合計: %.0f 円\n\n%s\n\n\u26A0\uFE0F リスク評価\n%s\n\n\uD83D\uDD04 リバランス提案\n%s".format(
                     totalAmountWeek,
                     categoryDetails.joinToString("\n"),
-                    riskSummaries.joinToString("\n")
+                    riskSummaries.joinToString("\n"),
+                    rebalanceText
                 )
 
             } catch (e: Exception) {
                 outputTextView.text = "⚠️ 7日予測エラー: ${e.message}"
                 Log.e("DEBUG", "7日予測失敗", e)
+            }
+        }
+
+        rebalanceButton.setOnClickListener {
+            try {
+                val inputRatio = generateScaledInputFromCsv(this)
+                val inputTotal = generateTotalInputFromCsv(this)
+                val totalWeek = predictDays(this, inputTotal, 7)
+                val totalMonth = predictDays(this, inputTotal, 30)
+                val ratio = runRatioInference(this, inputRatio)
+
+                val categoryNames = listOf("食費", "交通", "娯楽", "衣類・美容・日用品", "光熱費", "交際費", "その他")
+                val userBudget = loadLastMonthBudget(this, categoryNames)
+
+                val weekMap = categoryNames.mapIndexed { i, name -> name to (ratio[i] * totalWeek) }.toMap()
+                val monthMap = categoryNames.mapIndexed { i, name -> name to (ratio[i] * totalMonth) }.toMap()
+
+                val weekText = getRebalanceSuggestion(weekMap, userBudget)
+                val monthText = getRebalanceSuggestion(monthMap, userBudget)
+
+                outputTextView.text = "🔄 リバランス提案\n\n🕒 7日後までの予測に基づく提案：\n$weekText\n\n📅 月末までの予測に基づく提案：\n$monthText"
+
+            } catch (e: Exception) {
+                outputTextView.text = "⚠️ リバランス提案エラー: ${e.message}"
+            }
+        }
+
+        dailyLimitButton.setOnClickListener {
+            try {
+                val userBudget = loadLastMonthBudget(this, categoryNames)
+                val totalBudget = userBudget["total_budget"] ?: 0f
+                val dailyLimit = getDailyLimit(totalBudget)
+                outputTextView.text = dailyLimit
+            } catch (e: Exception) {
+                outputTextView.text = "⚠️ 日割り上限エラー: ${e.message}"
+            }
+        }
+
+        alertButton.setOnClickListener {
+            try {
+                val userBudget = loadLastMonthBudget(this, categoryNames)
+                val remainingDays = ChronoUnit.DAYS.between(LocalDate.now(), YearMonth.now().atEndOfMonth()).toInt().coerceAtLeast(1)
+                val dailyLimits = userBudget.mapValues { it.value / remainingDays }
+
+                val categoryMap = mapOf(
+                    "food" to "食費",
+                    "transport" to "交通",
+                    "entertainment" to "娯楽",
+                    "clothing_beauty_daily" to "衣類・美容・日用品",
+                    "utilities" to "光熱費",
+                    "social" to "交際費",
+                    "other" to "その他"
+                )
+
+                val file = File(this.filesDir, "spending.csv")
+                if (!file.exists()) throw Exception("spending.csv が存在しません")
+
+                val lines = file.readLines()
+                val today = LocalDate.now()
+                val todaySpending = lines.mapNotNull {
+                    val parts = it.split(",")
+                    if (parts.size >= 4) {
+                        val date = try {
+                            OffsetDateTime.parse(parts[0]).toLocalDate()
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val rawCategory = parts[2]
+                        val category = categoryMap[rawCategory] ?: return@mapNotNull null
+                        val amount = parts.last().toFloatOrNull() ?: 0f
+                        if (date == today) Pair(category, amount) else null
+                    } else null
+                }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
+
+                Log.d("DEBUG", "todaySpending: $todaySpending")
+                Log.d("DEBUG", "dailyLimits: $dailyLimits")
+
+                val alerts = todaySpending.mapNotNull { (cat, spent) ->
+                    val limit = dailyLimits[cat] ?: 0f
+                    when {
+                        limit == 0f -> "$cat：📎 先月の支出なし → 日割り上限なし (使用: ${"%.0f".format(spent)} 円)"
+                        spent > limit -> "$cat：${"%.0f".format(spent)} 円 ➡️ ⚠️ 上限 ${"%.0f".format(limit)} 円超過"
+                        else -> "$cat：${"%.0f".format(spent)} 円 / 上限 ${"%.0f".format(limit)} 円"
+                    }
+                }
+
+                outputTextView.text = if (alerts.isEmpty()) "✅ 本日の支出は記録されていません" else "📊 本日のカテゴリ別支出状況\n\n" + alerts.joinToString("\n")
+            } catch (e: Exception) {
+                outputTextView.text = "⚠️ アラートエラー: ${e.message}"
             }
         }
     }
@@ -133,36 +318,6 @@ class MainActivity : AppCompatActivity() {
 
         return result.sum()
     }
-
-    fun loadLastMonthBudget(context: Context, categoryNames: List<String>): Map<String, Float> {
-        val file = File(context.filesDir, "spending.csv")
-        if (!file.exists()) return categoryNames.associateWith { 0f }
-
-        val lines = file.readLines()
-        val lastMonth = YearMonth.now().minusMonths(1)
-
-        val filtered = lines.mapNotNull {
-            val parts = it.split(",")
-            if (parts.size >= 3) {
-                val date = try {
-                    OffsetDateTime.parse(parts[0]).toLocalDate()
-                } catch (e: Exception) {
-                    null
-                }
-                val category = parts[1]
-                val amount = parts[2].toFloatOrNull() ?: 0f
-                if (date != null && YearMonth.from(date) == lastMonth) Pair(category, amount) else null
-            } else null
-        }
-
-        val budgetMap = mutableMapOf<String, Float>()
-        for ((category, amount) in filtered) {
-            budgetMap[category] = budgetMap.getOrDefault(category, 0f) + amount
-        }
-        budgetMap["total_budget"] = budgetMap.values.sum()
-        return budgetMap
-    }
-
 
     fun generateScaledInputFromCsv(context: Context): FloatBuffer {
         val file = File(context.filesDir, "spending.csv")
@@ -314,5 +469,37 @@ class MainActivity : AppCompatActivity() {
         val output = result[0].value as Array<FloatArray>
 
         return output[0][0]
+    }
+}
+
+fun fetchAndSaveModel(context: Context, modelType: String = "total") {
+    val channel = ManagedChannelBuilder.forAddress("10.0.2.2", 50051)
+        .usePlaintext()
+        .build()
+    val stub = FederatedClientGrpc.newBlockingStub(channel)
+
+    Log.d("gRPC", "🛰️ Starting model download for: $modelType")
+
+    try {
+        val versionResponse = stub.checkModelVersion(
+            Spending.VersionRequest.newBuilder().setClientId("U001").build()
+        )
+        val downloadRequest = Spending.ModelRequest.newBuilder()
+            .setModelType(modelType)
+            .build()
+        val modelResponse = stub.downloadModel(downloadRequest)
+        val modelBytes = modelResponse.modelData.toByteArray()
+        Log.d("gRPC", "📦 Model bytes received: ${modelBytes.size}")
+
+        // 保存先ファイル名
+        val fileName = if (modelType == "total") "model_total_U001.onnx" else "model_ratio_U001.onnx"
+        val file = File(context.filesDir, fileName)
+        file.writeBytes(modelBytes)
+
+        Log.d("gRPC", "✅ Model ($modelType) saved to ${file.absolutePath}")
+    } catch (e: Exception) {
+        Log.e("gRPC", "❌ Download failed: ${e.message}")
+    } finally {
+        channel.shutdown()
     }
 }
