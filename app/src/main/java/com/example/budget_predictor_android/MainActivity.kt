@@ -27,6 +27,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+
+        //ファイルのどこを見ればいいの書いてほしい！
         val predictMonthButton = findViewById<Button>(R.id.predictMonthButton)
         val predictWeekButton = findViewById<Button>(R.id.predictWeekButton)
         val rebalanceButton = findViewById<Button>(R.id.rebalanceButton)
@@ -44,6 +46,7 @@ class MainActivity : AppCompatActivity() {
 
         val categoryNames = listOf("食費", "交通", "娯楽", "衣類・美容・日用品", "光熱費", "交際費", "その他")
 
+        //リスク評価を行う関数
         fun getRisk(pred: Float, budget: Float): String {
             return when {
                 pred > budget * 1.2 -> "🔴 高リスク"
@@ -52,6 +55,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        //リバランス提案を行う関数
         fun getRebalanceSuggestion(predicted: Map<String, Float>, budget: Map<String, Float>): String {
             val excess = mutableMapOf<String, Float>()
             val deficit = mutableMapOf<String, Float>()
@@ -76,6 +80,7 @@ class MainActivity : AppCompatActivity() {
             return suggestions.joinToString("\n")
         }
 
+        //日割り計算を行う関数
         fun getDailyLimit(budget: Float): String {
             val today = LocalDate.now()
             val endOfMonth = YearMonth.now().atEndOfMonth()
@@ -84,10 +89,12 @@ class MainActivity : AppCompatActivity() {
             return "📆 月末まで残り $remainingDays 日\n日割り支出上限: %.0f 円/日".format(dailyLimit)
         }
 
+        //csvからデータを読み込む関数
         fun loadLastMonthBudget(context: Context, categoryNames: List<String>): Map<String, Float> {
             val file = File(context.filesDir, "spending.csv")
             if (!file.exists()) return categoryNames.associateWith { 0f }
 
+            //カテゴリを日本語にするためのマッピング
             val categoryMap = mapOf(
                 "food" to "食費",
                 "transport" to "交通",
@@ -124,6 +131,7 @@ class MainActivity : AppCompatActivity() {
             return budgetMap
         }
 
+        //月末予測用ボタンの設定
         predictMonthButton.setOnClickListener {
             try {
                 val inputRatio = generateScaledInputFromCsv(this)
@@ -162,6 +170,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        //7日後予測用ボタンの設定
         predictWeekButton.setOnClickListener {
             try {
                 val inputRatio = generateScaledInputFromCsv(this)
@@ -200,6 +209,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        //リバランス提案用ボタンの設定
         rebalanceButton.setOnClickListener {
             try {
                 val inputRatio = generateScaledInputFromCsv(this)
@@ -224,6 +234,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        //日割り計算用ボタンの設定
         dailyLimitButton.setOnClickListener {
             try {
                 val userBudget = loadLastMonthBudget(this, categoryNames)
@@ -235,6 +246,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        //支出超過警告用ボタンの設定
         alertButton.setOnClickListener {
             try {
                 val userBudget = loadLastMonthBudget(this, categoryNames)
@@ -470,36 +482,36 @@ class MainActivity : AppCompatActivity() {
 
         return output[0][0]
     }
-}
 
-fun fetchAndSaveModel(context: Context, modelType: String = "total") {
-    val channel = ManagedChannelBuilder.forAddress("10.0.2.2", 50051)
-        .usePlaintext()
-        .build()
-    val stub = FederatedClientGrpc.newBlockingStub(channel)
-
-    Log.d("gRPC", "🛰️ Starting model download for: $modelType")
-
-    try {
-        val versionResponse = stub.checkModelVersion(
-            Spending.VersionRequest.newBuilder().setClientId("U001").build()
-        )
-        val downloadRequest = Spending.ModelRequest.newBuilder()
-            .setModelType(modelType)
+    fun fetchAndSaveModel(context: Context, modelType: String = "total") {
+        val channel = ManagedChannelBuilder.forAddress("10.0.2.2", 50051)
+            .usePlaintext()
             .build()
-        val modelResponse = stub.downloadModel(downloadRequest)
-        val modelBytes = modelResponse.modelData.toByteArray()
-        Log.d("gRPC", "📦 Model bytes received: ${modelBytes.size}")
+        val stub = FederatedClientGrpc.newBlockingStub(channel)
 
-        // 保存先ファイル名
-        val fileName = if (modelType == "total") "model_total_U001.onnx" else "model_ratio_U001.onnx"
-        val file = File(context.filesDir, fileName)
-        file.writeBytes(modelBytes)
+        Log.d("gRPC", "🛰️ Starting model download for: $modelType")
 
-        Log.d("gRPC", "✅ Model ($modelType) saved to ${file.absolutePath}")
-    } catch (e: Exception) {
-        Log.e("gRPC", "❌ Download failed: ${e.message}")
-    } finally {
-        channel.shutdown()
+        try {
+            val versionResponse = stub.checkModelVersion(
+                Spending.VersionRequest.newBuilder().setClientId("U001").build()
+            )
+            val downloadRequest = Spending.ModelRequest.newBuilder()
+                .setModelType(modelType)
+                .build()
+            val modelResponse = stub.downloadModel(downloadRequest)
+            val modelBytes = modelResponse.modelData.toByteArray()
+            Log.d("gRPC", "📦 Model bytes received: ${modelBytes.size}")
+
+            // 保存先ファイル名
+            val fileName = if (modelType == "total") "model_total_U001.onnx" else "model_ratio_U001.onnx"
+            val file = File(context.filesDir, fileName)
+            file.writeBytes(modelBytes)
+
+            Log.d("gRPC", "✅ Model ($modelType) saved to ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.e("gRPC", "❌ Download failed: ${e.message}")
+        } finally {
+            channel.shutdown()
+        }
     }
 }
